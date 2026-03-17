@@ -11,7 +11,8 @@ def generate_file_compose(output, clients):
         'image':'server:latest',
         'entrypoint':'python3 /main.py',
         'environment': ['PYTHONUNBUFFERED=1', 'LOGGING_LEVEL=DEBUG'],
-        'networks':['testing_net']
+        'networks':['testing_net'],
+        'volumes':['./server/config.ini:/config.ini']
     }
     for i in range(1,clients+1):
         client = f'client{i}'
@@ -21,7 +22,8 @@ def generate_file_compose(output, clients):
             'entrypoint':'/client',
             'environment': [f'CLI_ID={i}', 'CLI_LOG_LEVEL=DEBUG'],
             'networks':['testing_net'],
-            'depends_on':['server']
+            'depends_on':['server'],
+            'volumes':['./client/config.yaml:/config.yaml']
         }
     sections['services'] = services
     sections['networks'] = {
