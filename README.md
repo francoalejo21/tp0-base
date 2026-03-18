@@ -99,6 +99,10 @@ Se creó un script de bash que al ejecutarlo pasándo como parámetros: **nombre
 ### Ejercicio N°2:
 Modificar el cliente y el servidor para lograr que realizar cambios en el archivo de configuración no requiera reconstruír las imágenes de Docker para que los mismos sean efectivos. La configuración a través del archivo correspondiente (`config.ini` y `config.yaml`, dependiendo de la aplicación) debe ser inyectada en el container y persistida por fuera de la imagen (hint: `docker volumes`).
 
+#### Resolución:
+Se modificó el script de python `mi-generador.py`, para implementar bind-mounts tanto en el cliente como en el servidor. Estos mapean los archivos de configuración `config.yaml` y `config.ini` del host hacia las rutas correspondientes dentro de cada contenedor.
+Esta configuración permite que, al modificar los archivos desde el host, los cambios sean efectivos sin necesidad de reconstruir las imágenes de Docker. Así, al ejecutar nuevamente el comando `docker compose -f docker-compose-dev.yaml up -d`, los contenedores toman la nueva configuración de forma inmediata.
+Además, se eliminó del script la definición de variables de entorno que anteriormente sobreescribian los valores de los archivos, asegurando que la configuración se gestione exclusivamente a través de los archivos de configuracioón `config.yaml` y `config.ini`
 
 ### Ejercicio N°3:
 Crear un script de bash `validar-echo-server.sh` que permita verificar el correcto funcionamiento del servidor utilizando el comando `netcat` para interactuar con el mismo. Dado que el servidor es un echo server, se debe enviar un mensaje al servidor y esperar recibir el mismo mensaje enviado.
