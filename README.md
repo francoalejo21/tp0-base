@@ -93,6 +93,9 @@ python3 mi-generador.py $1 $2
 
 En el archivo de Docker Compose de salida se pueden definir volúmenes, variables de entorno y redes con libertad, pero recordar actualizar este script cuando se modifiquen tales definiciones en los sucesivos ejercicios.
 
+#### Resolución:
+Se creó un script de bash que al ejecutarlo pasándo como parámetros: **nombre_archivo_salida.yaml** y la **cantidad de clientes**,se pueda crear el archivo compose de docker que creará la definicion de los contenedores tanto para la cantidad de clientes, como para el servidor. El script de bash al ejecutarse llama a la función `mi-generador.py` que se encarga de crear el archivo compose basandose en el archivo `docker-compose-dev.yaml` que se nos proporcionó de ejemplo pero con una cantidad variable de clientes definida como parámetro de entrada
+
 ### Ejercicio N°2:
 Modificar el cliente y el servidor para lograr que realizar cambios en el archivo de configuración no requiera reconstruír las imágenes de Docker para que los mismos sean efectivos. La configuración a través del archivo correspondiente (`config.ini` y `config.yaml`, dependiendo de la aplicación) debe ser inyectada en el container y persistida por fuera de la imagen (hint: `docker volumes`).
 
