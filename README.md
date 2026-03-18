@@ -111,6 +111,12 @@ En caso de que la validación sea exitosa imprimir: `action: test_echo_server | 
 
 El script deberá ubicarse en la raíz del proyecto. Netcat no debe ser instalado en la máquina _host_ y no se pueden exponer puertos del servidor para realizar la comunicación (hint: `docker network`). `
 
+#### Resolución:
+El script `validar-echo-server.sh` funciona como un test de salud automatizado para nuestro sistema. En lugar de instalar herramientas directamente en nuestra computadora, lanzamos un contenedor temporal (cliente) utilizando una imagen de Busybox, que es una imagen mínima que ya trae netcat (nc) listo para usar. Con esto cumplimos la regla de no instalar nada en el host y mantenemos el entorno limpio.
+
+Para que la comunicación sea privada y segura (sin **abrir** puertos al exterior), conectamos el cliente a la misma red virtual de Docker que el servidor mediante `--network $NETWORK`. Esto permite que el cliente encuentre al servidor simplemente usando su nombre de host (server) y puerto.
+
+La lógica es sencilla: el script le pasa el mensaje al contenedor por un pipe (`echo $MESSAGE` | ...), el comando nc lo envía al servidor y capturamos la respuesta en la variable `RECIBIDO`. Al final, el script compara si lo que volvió es igual a lo que enviamos; si coinciden, imprime el mensaje de éxito que nuestro código de Python necesita para validar los tests. Lo mejor es que, gracias al flag `--rm`, el contenedor del cliente se destruye automáticamente apenas termina la tarea, sin ensuciar al sistema con un contenedor nuevo.
 
 ### Ejercicio N°4:
 Modificar servidor y cliente para que ambos sistemas terminen de forma _graceful_ al recibir la signal SIGTERM. Terminar la aplicación de forma _graceful_ implica que todos los _file descriptors_ (entre los que se encuentran archivos, sockets, threads y procesos) deben cerrarse correctamente antes que el thread de la aplicación principal muera. Loguear mensajes en el cierre de cada recurso (hint: Verificar que hace el flag `-t` utilizado en el comando `docker compose down`).
