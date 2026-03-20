@@ -121,6 +121,14 @@ La lógica es sencilla: el script le pasa el mensaje al contenedor por un pipe (
 ### Ejercicio N°4:
 Modificar servidor y cliente para que ambos sistemas terminen de forma _graceful_ al recibir la signal SIGTERM. Terminar la aplicación de forma _graceful_ implica que todos los _file descriptors_ (entre los que se encuentran archivos, sockets, threads y procesos) deben cerrarse correctamente antes que el thread de la aplicación principal muera. Loguear mensajes en el cierre de cada recurso (hint: Verificar que hace el flag `-t` utilizado en el comando `docker compose down`).
 
+#### Resolución:
+
+Cuando se ejecuta `docker compose down`, Docker envía la señal `SIGTERM` a cada container y espera hasta x segundos (controlado por el flag `-t`),  antes de forzar la terminación con `SIGKILL`. El objetivo es que ambos procesos detecten esta señal y liberen sus recursos ordenadamente dentro de ese intervalo.
+
+**Servidor (Python):** Se registra un handler para `SIGTERM` en el constructor de `Server` usando `signal.signal(signal.SIGTERM, self.__handle_sigterm)`. Al recibir la señal, el handler activa un flag `_running = False` y cierra el server socket. Esto es clave porque el método `accept()` es bloqueante: al cerrar el socket desde el handler se lanza una `OSError` que interrumpe la espera. El loop principal captura esa excepción, verifica el flag y sale limpiamente. Tanto el cierre del server socket como el de cada client socket son logueados individualmente.
+
+**Cliente (Go):** Se registra el interés en `SIGTERM` mediante `signal.Notify(sigChan, syscall.SIGTERM)` sobre un channel con buffer. Una goroutine dedicada queda bloqueada esperando en ese channel. Cuando llega la señal, la goroutine cierra la conexión TCP activa (si existe), loguea el cierre del recurso y termina el proceso con `os.Exit(0)`. Para evitar un doble cierre, `c.conn` se setea a `nil` luego de cada cierre normal dentro del loop principal.
+
 ## Parte 2: Repaso de Comunicaciones
 
 Las secciones de repaso del trabajo práctico plantean un caso de uso denominado **Lotería Nacional**. Para la resolución de las mismas deberá utilizarse como base el código fuente provisto en la primera parte, con las modificaciones agregadas en el ejercicio 4.
