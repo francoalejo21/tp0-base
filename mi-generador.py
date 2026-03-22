@@ -9,8 +9,7 @@ def generate_file_compose(output, clients):
     services['server'] = {
         'container_name':'server',
         'image':'server:latest',
-        'entrypoint':'python3 /main.py',
-        'environment': ['PYTHONUNBUFFERED=1'],
+        'entrypoint':'/server',
         'networks':['testing_net'],
         'volumes':['./server/config.ini:/config.ini']
     }
