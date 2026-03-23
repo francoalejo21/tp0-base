@@ -14,6 +14,7 @@ var log = logging.MustGetLogger("log")
 type Server struct {
 	listener net.Listener
 	running  bool
+	conn     net.Conn
 }
 
 func NewServer(port string) (*Server, error) {
@@ -37,6 +38,9 @@ func NewServer(port string) (*Server, error) {
 		s.running = false
 		s.listener.Close()
 		log.Info("action: close_resource | result: success | resource: server_socket")
+		if s.conn != nil {
+			s.conn.Close()
+		}
 	}()
 
 	return s, nil
@@ -53,27 +57,31 @@ func (s *Server) Run() {
 }
 
 func (s *Server) handleClientConnection(conn net.Conn) {
+	s.conn = conn
 	defer func() {
 		conn.Close()
+		s.conn = nil
 		log.Info("action: close_resource | result: success | resource: client_socket")
 	}()
 
-	buffer := make([]byte, 1024)
-	// TODO: Modify the receive to avoid short-reads
-	n, err := conn.Read(buffer)
-	if err != nil {
-		log.Criticalf("action: receive_message | result: fail | error: %v", err)
-		return
-	}
+	for {
+		buffer := make([]byte, 1024)
+		// TODO: Modify the receive to avoid short-reads
+		n, err := conn.Read(buffer)
+		if err != nil {
+			return
+		}
 
-	msg := string(buffer[:n])
-	addr := conn.RemoteAddr().String()
+		msg := string(buffer[:n])
+		addr := conn.RemoteAddr().String()
 
-	log.Infof("action: receive_message | result: success | ip: %s | msg: %s", addr, msg)
-	// TODO: Modify the send to avoid short-writes
-	_, err = conn.Write([]byte(msg + "\n"))
-	if err != nil {
-		log.Criticalf("action: send_message | result: fail | error: %v", err)
+		log.Infof("action: receive_message | result: success | ip: %s | msg: %s", addr, msg)
+		// TODO: Modify the send to avoid short-writes
+		_, err = conn.Write([]byte(msg + "\n"))
+		if err != nil {
+			log.Criticalf("action: send_message | result: fail | error: %v", err)
+			return
+		}
 	}
 }
 
