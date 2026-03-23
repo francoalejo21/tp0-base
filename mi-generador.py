@@ -19,6 +19,7 @@ def generate_file_compose(output, clients):
             'container_name': client,
             'image':'client:latest',
             'entrypoint':'/client',
+            'env_file' : ".env",
             'environment': [f'CLI_ID={i}'],
             'networks':['testing_net'],
             'depends_on':['server'],
