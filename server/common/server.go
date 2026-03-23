@@ -6,6 +6,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/7574-sistemas-distribuidos/docker-compose-init/protocol"
 	"github.com/op/go-logging"
 )
 
@@ -64,24 +65,25 @@ func (s *Server) handleClientConnection(conn net.Conn) {
 		log.Info("action: close_resource | result: success | resource: client_socket")
 	}()
 
-	for {
-		buffer := make([]byte, 1024)
-		// TODO: Modify the receive to avoid short-reads
-		n, err := conn.Read(buffer)
-		if err != nil {
-			return
-		}
+	bet, err := protocol.ReceiveBet(conn)
+	if err != nil {
+		log.Errorf("action: receive_bet | result: fail | error: %v", err)
+		return
+	}
 
-		msg := string(buffer[:n])
-		addr := conn.RemoteAddr().String()
+	if err := protocol.StoreBets([]protocol.Bet{bet}); err != nil {
+		log.Errorf("action: store_bet | result: fail | error: %v", err)
+		return
+	}
 
-		log.Infof("action: receive_message | result: success | ip: %s | msg: %s", addr, msg)
-		// TODO: Modify the send to avoid short-writes
-		_, err = conn.Write([]byte(msg + "\n"))
-		if err != nil {
-			log.Criticalf("action: send_message | result: fail | error: %v", err)
-			return
-		}
+	log.Infof(
+		"action: apuesta_almacenada | result: success | dni: %v | numero: %v",
+		bet.Document,
+		bet.Number,
+	)
+
+	if err := protocol.SendConfirmation(conn); err != nil {
+		log.Errorf("action: send_confirmation | result: fail | error: %v", err)
 	}
 }
 

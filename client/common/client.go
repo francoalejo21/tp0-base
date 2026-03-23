@@ -1,14 +1,13 @@
 package common
 
 import (
-	"bufio"
-	"fmt"
 	"net"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/7574-sistemas-distribuidos/docker-compose-init/protocol"
 	"github.com/op/go-logging"
 )
 
@@ -70,41 +69,51 @@ func (c *Client) StartClientLoop() {
 		os.Exit(0)
 	}()
 
-	// There is an autoincremental msgID to identify every message sent
-	// Messages if the message amount threshold has not been surpassed
-	for msgID := 1; msgID <= c.config.LoopAmount; msgID++ {
-		// Create the connection the server in every loop iteration. Send an
-		if c.conn == nil {
-			c.createClientSocket()
-		}
-
-		// TODO: Modify the send to avoid short-write
-		fmt.Fprintf(
-			c.conn,
-			"[CLIENT %v] Message N°%v\n",
-			c.config.ID,
-			msgID,
-		)
-		msg, err := bufio.NewReader(c.conn).ReadString('\n')
-
-		if err != nil {
-			log.Errorf("action: receive_message | result: fail | client_id: %v | error: %v",
-				c.config.ID,
-				err,
-			)
-			c.conn.Close()
-			return
-		}
-
-		log.Infof("action: receive_message | result: success | client_id: %v | msg: %v",
-			c.config.ID,
-			msg,
-		)
-
-		// Wait a time between sending one message and the next one
-		time.Sleep(c.config.LoopPeriod)
-
+	// ── Build Bet from environment variables ──────────────────────────────────
+	bet, err := protocol.NewBet(
+		c.config.ID, // agency ID viene de la config (seteado por Docker Compose)
+		mustGetenv("NOMBRE"),
+		mustGetenv("APELLIDO"),
+		mustGetenv("DOCUMENTO"),
+		mustGetenv("NACIMIENTO"),
+		mustGetenv("NUMERO"),
+	)
+	if err != nil {
+		log.Fatalf("action: build_bet | result: fail | client_id: %v | error: %v", c.config.ID, err)
 	}
-	c.conn.Close()
-	log.Infof("action: loop_finished | result: success | client_id: %v", c.config.ID)
+
+	// ── Connect ───────────────────────────────────────────────────────────────
+	if err := c.createClientSocket(); err != nil {
+		log.Criticalf("action: connect | result: fail | client_id: %v | error: %v", c.config.ID, err)
+		return
+	}
+	defer func() {
+		c.conn.Close()
+		log.Infof("action: close_resource | result: success | resource: client_socket | client_id: %v", c.config.ID)
+	}()
+	// ── Send bet ──────────────────────────────────────────────────────────────
+	if err := protocol.SendBet(c.conn, bet); err != nil {
+		log.Errorf("action: send_bet | result: fail | client_id: %v | error: %v", c.config.ID, err)
+		return
+	}
+
+	// ── Wait for server confirmation ──────────────────────────────────────────
+	if err := protocol.ReceiveConfirmation(c.conn); err != nil {
+		log.Errorf("action: receive_confirmation | result: fail | client_id: %v | error: %v", c.config.ID, err)
+		return
+	}
+
+	log.Infof(
+		"action: apuesta_enviada | result: success | dni: %v | numero: %v",
+		bet.Document,
+		bet.Number,
+	)
+}
+
+func mustGetenv(key string) string {
+	val := os.Getenv(key)
+	if val == "" {
+		log.Fatalf("action: read_env | result: fail | variable: %v | error: not set or empty", key)
+	}
+	return val
 }
