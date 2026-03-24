@@ -11,7 +11,7 @@ import (
 const HEADER_SIZE uint32 = 4
 
 // SendAll sends all bytes to the connection
-func SendAll(conn net.Conn, data []byte) error {
+func sendAll(conn net.Conn, data []byte) error {
 	total := len(data)
 	sent := 0
 	for sent < total {
@@ -25,7 +25,7 @@ func SendAll(conn net.Conn, data []byte) error {
 }
 
 // RecvAll reads exactly n bytes from the connection
-func RecvAll(conn net.Conn, n uint32) ([]byte, error) {
+func recvAll(conn net.Conn, n uint32) ([]byte, error) {
 	buf := make([]byte, n)
 	if _, err := io.ReadFull(conn, buf); err != nil {
 		return nil, fmt.Errorf("short-read: expected %d bytes: %w", n, err)
@@ -39,12 +39,12 @@ func SendFrame(conn net.Conn, payload []byte) error {
 	binary.BigEndian.PutUint32(header, uint32(len(payload)))
 
 	frame := append(header, payload...)
-	return SendAll(conn, frame)
+	return sendAll(conn, frame)
 }
 
 // RecvFrame reads a length-prefixed frame and returns the payload.
 func RecvFrame(conn net.Conn) ([]byte, error) {
-	header, err := RecvAll(conn, HEADER_SIZE)
+	header, err := recvAll(conn, HEADER_SIZE)
 	if err != nil {
 		return nil, fmt.Errorf("error reading frame header: %w", err)
 	}
@@ -54,5 +54,5 @@ func RecvFrame(conn net.Conn) ([]byte, error) {
 		return nil, fmt.Errorf("invalid frame length: %d", msgLen)
 	}
 
-	return RecvAll(conn, msgLen)
+	return recvAll(conn, msgLen)
 }
