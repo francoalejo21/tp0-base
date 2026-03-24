@@ -59,7 +59,16 @@ func (c *Client) createClientSocket() error {
 }
 
 func (c *Client) StartClientLoop() {
+	err := c.createClientSocket()
+	if err != nil {
+		log.Criticalf("action: connect | result: fail | client_id: %v | error: %v", c.config.ID, err)
+		return
+	}
+	defer c.cleanupConnection()
+	c.processDataset()
+}
 
+func (c *Client) SetupSignalHandler() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGTERM)
 
@@ -68,112 +77,48 @@ func (c *Client) StartClientLoop() {
 		log.Infof("action: shutdown | result: in_progress | signal: SIGTERM | client_id: %v", c.config.ID)
 		if c.conn != nil {
 			c.conn.Close()
-			log.Infof("action: close_resource | result: success | resource: client_socket | client_id: %v", c.config.ID)
 		}
-		log.Infof("action: shutdown | result: success | client_id: %v", c.config.ID)
 		os.Exit(0)
 	}()
+}
 
+func (c *Client) processDataset() {
 	filePath := fmt.Sprintf("agency-%s.csv", c.config.ID)
 	file, err := os.Open(filePath)
 	if err != nil {
-		log.Criticalf("action: open_dataset | result: fail | client_id: %v | error: %v", c.config.ID, err)
+		log.Criticalf("action: open_dataset | result: fail | error: %v", err)
 		return
 	}
 	defer file.Close()
 
-	if err := c.createClientSocket(); err != nil {
-		log.Criticalf("action: connect | result: fail | client_id: %v | error: %v", c.config.ID, err)
-		return
-	}
-	defer func() {
-		c.conn.Close()
-		log.Infof("action: close_resource | result: success | resource: client_socket | client_id: %v", c.config.ID)
-	}()
-
 	reader := csv.NewReader(file)
-
-	batch := make([]protocol.Bet, 0, c.config.BatchMaxAmount)
-	batchBytes := 0
-	const separatorSize = 1
-
-	flushBatch := func() bool {
-		if len(batch) == 0 {
-			return true
-		}
-
-		if err := protocol.SendBatch(c.conn, batch); err != nil {
-			log.Errorf("action: send_batch | result: fail | client_id: %v | error: %v", c.config.ID, err)
-			return false
-		}
-
-		ok, err := protocol.ReceiveBatchConfirmation(c.conn)
-		if err != nil {
-			log.Errorf("action: receive_confirmation | result: fail | client_id: %v | error: %v", c.config.ID, err)
-			return false
-		}
-		if !ok {
-			log.Errorf("action: send_batch | result: fail | client_id: %v | server rejected batch", c.config.ID)
-			return false
-		}
-
-		log.Infof("action: batch_enviado | result: success | client_id: %v | cantidad: %v", c.config.ID, len(batch))
-		batch = batch[:0]
-		batchBytes = 0
-		return true
-	}
+	batcher := NewBatcher(c.conn, c.config.ID, c.config.BatchMaxAmount, MaxSizeBatch)
 
 	for {
 		record, err := reader.Read()
 		if err == io.EOF {
 			break
 		}
+		if err != nil || len(record) < 5 {
+			continue // decido omitir bets incompletas
+		}
+
+		bet, err := protocol.NewBet(c.config.ID, record[0], record[1], record[2], record[3], record[4])
 		if err != nil {
-			log.Errorf("action: read_dataset | result: fail | client_id: %v | error: %v", c.config.ID, err)
-			return
+			log.Errorf("action: parse_bet | result: fail | error: %v", err)
+			break
 		}
 
-		// CSV columns: firstname, lastname, document, birthdate, number
-		if len(record) < 5 {
-			log.Errorf("action: parse_record | result: fail | client_id: %v | error: expected 5 fields, got %d", c.config.ID, len(record))
-			return
-		}
-
-		bet, err := protocol.NewBet(
-			c.config.ID, // agency
-			record[0],   // firstname
-			record[1],   // lastname
-			record[2],   // document
-			record[3],   // birthdate
-			record[4],   // number
-		)
+		err = batcher.Add(bet)
 		if err != nil {
-			log.Errorf("action: parse_bet | result: fail | client_id: %v | error: %v", c.config.ID, err)
-			return
+			log.Errorf("action: batching | result: fail | error: %v", err)
+			break
 		}
-
-		// How many bytes does this bet contribute to the payload?
-		// First bet in a batch: just its own serialized length.
-		// Every subsequent bet: its length + 1 byte for the '\n' separator.
-		betSize := protocol.BetSerializedSize(bet)
-		incomingSize := betSize
-		if len(batch) > 0 {
-			incomingSize += separatorSize
-		}
-
-		// Flush before appending if either limit would be breached.
-		if len(batch) >= c.config.BatchMaxAmount || (len(batch) > 0 && batchBytes+incomingSize > MaxSizeBatch) {
-			if !flushBatch() {
-				return
-			}
-			// Batch is now empty: no separator cost for the first record.
-			incomingSize = betSize
-		}
-
-		batch = append(batch, bet)
-		batchBytes += incomingSize
 	}
+	batcher.Flush()
+}
 
-	// Flush any remaining bets.
-	flushBatch()
+func (c *Client) cleanupConnection() {
+	c.conn.Close()
+	log.Infof("action: close_resource | result: success | resource: client_socket | client_id: %v", c.config.ID)
 }
