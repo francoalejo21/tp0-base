@@ -16,9 +16,10 @@ var log = logging.MustGetLogger("log")
 const PATH_CONFIG = "./config.ini"
 
 type ConfigParams struct {
-	Port          int
-	ListenBacklog int
-	LoggingLevel  string
+	Port           int
+	ListenBacklog  int
+	LoggingLevel   string
+	clients_amount int
 }
 
 func initializeConfig() (ConfigParams, error) {
@@ -49,9 +50,10 @@ func initializeConfig() (ConfigParams, error) {
 	}
 
 	return ConfigParams{
-		Port:          v.GetInt("DEFAULT.SERVER_PORT"),
-		ListenBacklog: v.GetInt("DEFAULT.SERVER_LISTEN_BACKLOG"),
-		LoggingLevel:  v.GetString("DEFAULT.LOGGING_LEVEL"),
+		Port:           v.GetInt("DEFAULT.SERVER_PORT"),
+		ListenBacklog:  v.GetInt("DEFAULT.SERVER_LISTEN_BACKLOG"),
+		LoggingLevel:   v.GetString("DEFAULT.LOGGING_LEVEL"),
+		clients_amount: v.GetInt("CLIENTS_AMOUNT"),
 	}, nil
 }
 
@@ -82,7 +84,7 @@ func main() {
 	loggingLevel := configParams.LoggingLevel
 	port := configParams.Port
 	listenBacklog := configParams.ListenBacklog
-
+	clientAmount := configParams.clients_amount
 	InitLogger(loggingLevel)
 
 	log.Debugf(
@@ -92,7 +94,7 @@ func main() {
 		loggingLevel,
 	)
 
-	server, err := common.NewServer(strconv.Itoa(port))
+	server, err := common.NewServer(strconv.Itoa(port), clientAmount)
 	if err != nil {
 		log.Fatal(err)
 	}
