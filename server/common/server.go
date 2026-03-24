@@ -30,8 +30,10 @@ func NewServer(port string) (*Server, error) {
 		listener: listener,
 		running:  true,
 	}
+	return s, nil
+}
 
-	// Manejo de SIGTERM
+func (s *Server) SetupSignalHandler() {
 	sigchan := make(chan os.Signal, 1)
 	signal.Notify(sigchan, syscall.SIGTERM)
 
@@ -39,14 +41,12 @@ func NewServer(port string) (*Server, error) {
 		<-sigchan
 		log.Info("action: shutdown | result: in_progress | signal: SIGTERM")
 		s.running = false
-		s.listener.Close()
-		log.Info("action: close_resource | result: success | resource: server_socket")
 		if s.conn != nil {
 			s.conn.Close()
 		}
+		s.listener.Close()
+		log.Info("action: close_resource | result: success | resource: server_socket")
 	}()
-
-	return s, nil
 }
 
 func (s *Server) Run() {
@@ -61,40 +61,56 @@ func (s *Server) Run() {
 
 func (s *Server) handleClientConnection(conn net.Conn) {
 	s.conn = conn
-	defer func() {
-		conn.Close()
-		s.conn = nil
-		log.Info("action: close_resource | result: success | resource: client_socket")
-	}()
+	defer s.cleanupConnection(conn)
 
 	for {
-		bets, err := protocol.ReceiveBatch(conn)
+		err := s.processNextBatch(conn)
 		if err != nil {
-			if errors.Is(err, io.EOF) {
-				log.Info("action: client_finished | result: success")
-				break
-			}
-			log.Errorf("action: receive_batch | result: fail | error: %v", err)
-			break
-		}
-		amount := len(bets)
-		err = protocol.StoreBets(bets)
-		if err != nil {
-			log.Errorf(
-				"action: bets almacenadas | result: fail | cantidad: %v | error: %v",
-				amount, err,
-			)
-			_ = protocol.SendBatchConfirmation(conn, false)
-			break
-		}
-
-		log.Infof("action: apuesta_recibida | result: success | cantidad: %v", amount)
-
-		if err := protocol.SendBatchConfirmation(conn, true); err != nil {
-			log.Errorf("action: send_confirmation | result: fail | error: %v", err)
+			s.handleDisconnection(err)
 			break
 		}
 	}
+}
+
+func (s *Server) cleanupConnection(conn net.Conn) {
+	conn.Close()
+	s.conn = nil
+	log.Info("action: close_resource | result: success | resource: client_socket")
+}
+
+func (s *Server) handleDisconnection(err error) {
+	if errors.Is(err, io.EOF) {
+		log.Info("action: client_finished | result: success")
+	} else {
+		log.Errorf("action: connection_error | result: fail | error: %v", err)
+	}
+}
+
+func (s *Server) storeAndConfirm(conn net.Conn, bets []protocol.Bet) error {
+	amount := len(bets)
+
+	err := protocol.StoreBets(bets)
+	if err != nil {
+		log.Errorf("action: bets_almacenadas | result: fail | cantidad: %v | error: %v", amount, err)
+		_ = protocol.SendBatchConfirmation(conn, false)
+		return err
+	}
+
+	log.Infof("action: apuesta_recibida | result: success | cantidad: %v", amount)
+	err = protocol.SendBatchConfirmation(conn, true)
+	if err != nil {
+		log.Errorf("action: send_confirmation | result: fail | error: %v", err)
+		return err
+	}
+	return nil
+}
+
+func (s *Server) processNextBatch(conn net.Conn) error {
+	bets, err := protocol.ReceiveBatch(conn)
+	if err != nil {
+		return err
+	}
+	return s.storeAndConfirm(conn, bets)
 }
 
 func (s *Server) acceptNewConnection() net.Conn {
@@ -109,13 +125,4 @@ func (s *Server) acceptNewConnection() net.Conn {
 	log.Infof("action: accept_connections | result: success | ip: %s", addr)
 
 	return conn
-}
-
-func main() {
-	server, err := NewServer("")
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	server.Run()
 }

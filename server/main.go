@@ -96,6 +96,6 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-
+	server.SetupSignalHandler()
 	server.Run()
 }
