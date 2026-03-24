@@ -1,6 +1,7 @@
 package common
 
 import (
+	"io"
 	"net"
 	"os"
 	"os/signal"
@@ -65,25 +66,33 @@ func (s *Server) handleClientConnection(conn net.Conn) {
 		log.Info("action: close_resource | result: success | resource: client_socket")
 	}()
 
-	bet, err := protocol.ReceiveBet(conn)
-	if err != nil {
-		log.Errorf("action: receive_bet | result: fail | error: %v", err)
-		return
-	}
+	for {
+		bets, err := protocol.ReceiveBatch(conn)
+		if err != nil {
+			if err == io.EOF {
+				log.Info("action: client_finished | result: success")
+				break
+			}
+			log.Errorf("action: receive_batch | result: fail | error: %v", err)
+			break
+		}
+		amount := len(bets)
+		err = protocol.StoreBets(bets)
+		if err != nil {
+			log.Errorf(
+				"action: bets almacenadas | result: fail | cantidad: %v | error: %v",
+				amount, err,
+			)
+			_ = protocol.SendBatchConfirmation(conn, false)
+			break
+		}
 
-	if err := protocol.StoreBets([]protocol.Bet{bet}); err != nil {
-		log.Errorf("action: store_bet | result: fail | error: %v", err)
-		return
-	}
+		log.Infof("action: apuesta_recibida | result: success | cantidad: %v", amount)
 
-	log.Infof(
-		"action: apuesta_almacenada | result: success | dni: %v | numero: %v",
-		bet.Document,
-		bet.Number,
-	)
-
-	if err := protocol.SendConfirmation(conn); err != nil {
-		log.Errorf("action: send_confirmation | result: fail | error: %v", err)
+		if err := protocol.SendBatchConfirmation(conn, true); err != nil {
+			log.Errorf("action: send_confirmation | result: fail | error: %v", err)
+			break
+		}
 	}
 }
 
