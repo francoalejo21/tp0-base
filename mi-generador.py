@@ -11,7 +11,8 @@ def generate_file_compose(output, clients):
         'image':'server:latest',
         'entrypoint':'/server',
         'networks':['testing_net'],
-        'volumes':['./server/config.ini:/config.ini']
+        'volumes':['./server/config.ini:/config.ini'],
+        'environment': [f'CLIENTS_AMOUNT={clients}'],
     }
     for i in range(1,clients+1):
         client = f'client{i}'
