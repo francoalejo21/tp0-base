@@ -10,9 +10,20 @@ import (
 const betSeparator = "\n"
 const fieldSeparator = "|"
 const expectedFields = 6
+const WinnersSeparator = ","
 
-const confirmOK = "OK"
-const confirmERR = "ERR"
+// MessagesTypes
+type CmdType string
+
+const (
+	CmdBatch   CmdType = "BATCH"
+	CmdFin     CmdType = "FIN"
+	CmdQuery   CmdType = "QUERY"
+	CmdWait    CmdType = "WAIT"
+	CmdWinners CmdType = "WINNERS"
+)
+const ConfirmOK = "OK"
+const ConfirmERR = "ERR"
 
 // format: agency|firstname|lastname|document|birthdate|number
 func serialize(b Bet) string {
@@ -36,7 +47,7 @@ func deserialize(payload string) (Bet, error) {
 	return NewBet(fields[0], fields[1], fields[2], fields[3], fields[4], fields[5])
 }
 
-func serializeBatch(bets []Bet) []byte {
+func SerializeBatch(bets []Bet) []byte {
 	lines := make([]string, len(bets))
 	for i, b := range bets {
 		lines[i] = string(serialize(b))
@@ -44,7 +55,7 @@ func serializeBatch(bets []Bet) []byte {
 	return []byte(strings.Join(lines, betSeparator))
 }
 
-func deserializeBatch(payload []byte) ([]Bet, error) {
+func DeserializeBatch(payload []byte) ([]Bet, error) {
 	lines := strings.Split(string(payload), betSeparator)
 	bets := make([]Bet, 0, len(lines))
 	for _, line := range lines {
@@ -60,26 +71,12 @@ func deserializeBatch(payload []byte) ([]Bet, error) {
 	return bets, nil
 }
 
-// SendBatch serializes a slice of Bets and sends them as a single length-prefixed frame.
-func SendBatch(conn net.Conn, bets []Bet) error {
-	return SendFrame(conn, serializeBatch(bets))
-}
-
-// ReceiveBatch reads a single frame and deserializes it as a slice of Bets.
-func ReceiveBatch(conn net.Conn) ([]Bet, error) {
-	payload, err := RecvFrame(conn)
-	if err != nil {
-		return nil, err
-	}
-	return deserializeBatch(payload)
-}
-
 // SendBatchConfirmation sends OK on success or ERR on failure.
 func SendBatchConfirmation(conn net.Conn, success bool) error {
 	if success {
-		return SendFrame(conn, []byte(confirmOK))
+		return SendFrame(conn, []byte(ConfirmOK))
 	}
-	return SendFrame(conn, []byte(confirmERR))
+	return SendFrame(conn, []byte(ConfirmERR))
 }
 
 // ReceiveBatchConfirmation reads the server's response for a batch.
@@ -90,9 +87,9 @@ func ReceiveBatchConfirmation(conn net.Conn) (bool, error) {
 		return false, err
 	}
 	switch string(payload) {
-	case confirmOK:
+	case ConfirmOK:
 		return true, nil
-	case confirmERR:
+	case ConfirmERR:
 		return false, nil
 	default:
 		return false, fmt.Errorf("unexpected batch confirmation: %q", string(payload))
@@ -103,4 +100,44 @@ func ReceiveBatchConfirmation(conn net.Conn) (bool, error) {
 // batch frame payload
 func BetSerializedSize(b Bet) int {
 	return len(serialize(b))
+}
+
+func SendBatch(conn net.Conn, bets []Bet) error {
+	serializedBets := SerializeBatch(bets)
+	msg := fmt.Sprintf("%s%s%s", CmdBatch, fieldSeparator, string(serializedBets))
+	return SendFrame(conn, []byte(msg))
+}
+
+func SendFin(conn net.Conn) error {
+	return SendFrame(conn, []byte(CmdFin))
+}
+
+func SendQuery(conn net.Conn, agencyID string) error {
+	msg := fmt.Sprintf("%s%s%s", CmdQuery, fieldSeparator, agencyID)
+	return SendFrame(conn, []byte(msg))
+}
+
+func SendWait(conn net.Conn) error {
+	return SendFrame(conn, []byte(CmdWait))
+}
+
+func SendWinners(conn net.Conn, winners []string) error {
+	msg := fmt.Sprintf("%s%s%s", CmdWinners, fieldSeparator, strings.Join(winners, WinnersSeparator))
+	return SendFrame(conn, []byte(msg))
+}
+
+func ReadCommand(conn net.Conn) (CmdType, []byte, error) {
+	payload, err := RecvFrame(conn)
+	if err != nil {
+		return "", nil, err
+	}
+
+	parts := strings.SplitN(string(payload), fieldSeparator, 2)
+
+	cmd := CmdType(parts[0])
+
+	if len(parts) == 1 {
+		return cmd, nil, nil
+	}
+	return cmd, []byte(parts[1]), nil
 }
