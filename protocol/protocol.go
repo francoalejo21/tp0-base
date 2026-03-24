@@ -14,7 +14,7 @@ const expectedFields = 6
 const confirmOK = "OK"
 const confirmERR = "ERR"
 
-// first approach format: agency|firstname|lastname|document|birthdate|number
+// format: agency|firstname|lastname|document|birthdate|number
 func serialize(b Bet) string {
 	fields := []string{
 		strconv.Itoa(b.Agency),
@@ -27,7 +27,7 @@ func serialize(b Bet) string {
 	return strings.Join(fields, fieldSeparator)
 }
 
-// deserialize decodes a raw payload back into a Bet.
+// deserialize decodes a string payload back into a Bet.
 func deserialize(payload string) (Bet, error) {
 	fields := strings.Split(string(payload), fieldSeparator)
 	if len(fields) != expectedFields {
