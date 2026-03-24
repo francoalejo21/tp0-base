@@ -23,7 +23,8 @@ def generate_file_compose(output, clients):
             'environment': [f'CLI_ID={i}'],
             'networks':['testing_net'],
             'depends_on':['server'],
-            'volumes':['./client/config.yaml:/config.yaml']
+            'volumes':['./client/config.yaml:/config.yaml',
+                       f'./.data/agency-{i}.csv:/agency-{i}.csv']
         }
     sections['services'] = services
     sections['networks'] = {
