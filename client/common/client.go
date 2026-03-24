@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 var log = logging.MustGetLogger("log")
 
 const MaxSizeBatch = 8 * 1024 // 8 KB
+const TimeSleep = 2
 
 // ClientConfig Configuration used by the client
 type ClientConfig struct {
@@ -64,8 +66,9 @@ func (c *Client) StartClientLoop() {
 		log.Criticalf("action: connect | result: fail | client_id: %v | error: %v", c.config.ID, err)
 		return
 	}
-	defer c.cleanupConnection()
 	c.processDataset()
+	c.cleanupConnection()
+	c.pollWinners()
 }
 
 func (c *Client) SetupSignalHandler() {
@@ -115,10 +118,51 @@ func (c *Client) processDataset() {
 			break
 		}
 	}
-	batcher.Flush()
+	err = batcher.Flush()
+	if err != nil {
+		log.Errorf("action: flush_batch | result: fail | error: %v", err)
+	}
+	err = protocol.SendFin(c.conn)
+	if err != nil {
+		log.Errorf("action: send_fin | result: fail | error: %v", err)
+	}
 }
 
 func (c *Client) cleanupConnection() {
 	c.conn.Close()
 	log.Infof("action: close_resource | result: success | resource: client_socket | client_id: %v", c.config.ID)
+}
+
+// Poll to server asking for the winners
+func (c *Client) pollWinners() {
+	for {
+		time.Sleep(TimeSleep * time.Second)
+
+		err := c.createClientSocket()
+		if err != nil {
+			continue
+		}
+
+		_ = protocol.SendQuery(c.conn, c.config.ID)
+
+		cmd, data, err := protocol.ReadCommand(c.conn)
+
+		c.cleanupConnection()
+
+		if err != nil {
+			continue
+		}
+
+		if cmd == protocol.CmdWait {
+			continue
+		} else if cmd == protocol.CmdWinners {
+			winnersStr := string(data)
+			cantGanadores := 0
+			if winnersStr != "" {
+				cantGanadores = len(strings.Split(winnersStr, protocol.WinnersSeparator))
+			}
+			log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %d", cantGanadores)
+			break
+		}
+	}
 }
