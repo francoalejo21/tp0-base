@@ -1,6 +1,7 @@
 package common
 
 import (
+	"errors"
 	"io"
 	"net"
 	"os"
@@ -69,7 +70,7 @@ func (s *Server) handleClientConnection(conn net.Conn) {
 	for {
 		bets, err := protocol.ReceiveBatch(conn)
 		if err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				log.Info("action: client_finished | result: success")
 				break
 			}
