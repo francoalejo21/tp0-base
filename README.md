@@ -168,6 +168,32 @@ La cantidad máxima de apuestas dentro de cada _batch_ debe ser configurable des
 
 Por su parte, el servidor deberá responder con éxito solamente si todas las apuestas del _batch_ fueron procesadas correctamente.
 
+#### Resolución
+
+Con el objetivo de optimizar el uso de la red y reducir el *overhead* de transmisión, se modificó la lógica del cliente para enviar múltiples apuestas en una sola petición TCP (*batching*). Además, se reemplazó la generación estática de apuestas por la ingesta de archivos CSV reales provistos por la cátedra.
+
+#### 1. Volúmenes de Docker
+En lugar de inyectar los datos como variables de entorno estáticas, ahora la información de cada agencia se simula mediante la lectura de archivos. 
+* **Docker Volumes:** Los archivos ubicados en `.data/agency-{N}.csv` se montan en tiempo de ejecución en los contenedores (mediante bind_mounts), evitando acoplar los datos a las imágenes construidas.
+
+#### 2. Batcher (Control de Capacidad)
+Para manejar la agrupación de apuestas de forma segura y modular, se creó la entidad `Batcher` (`batcher.go`). Esta estructura actúa como un *buffer* en memoria que acumula apuestas hasta alcanzar uno de los dos límites permitidos, momento en el cual realiza un `Flush()` hacia el servidor:
+* **Límite de Cantidad (`maxAmount`):** Límite lógico de apuestas por lote, configurable dinámicamente desde el archivo `config.yaml`.
+* **Límite de Tamaño (`maxSize`):** Límite físico fijado por código para que el *Payload* de red no exceda los **8 KB** (`8 * 1024` bytes). 
+* **Cálculo Predictivo:** El método `calculateIncomingSize` evalúa anticipadamente el tamaño serializado de la nueva apuesta (sumando el byte del caracter separador `\n`). Si la función `hasCapacityFor` determina que se superarán los 8 KB, el `Batcher` envía automáticamente el lote acumulado actual antes de encolar la nueva apuesta.
+
+#### 3. Evolución del Protocolo (Serialización Múltiple)
+La capa de protocolo (`protocol.go`) se actualizó para soportar el envío y recepción de *slices* (arreglos) de apuestas (`[]Bet`) en lugar de unidades individuales:
+* **Estructura del Payload:** Ahora el *Payload* contiene múltiples apuestas concatenadas. Los campos de una misma apuesta se separan con el caracter `|`, mientras que las distintas apuestas del lote se separan con un salto de línea (`\n`).
+
+```text
++-------------------------+-------------------------------------------------------------+
+| HEADER (4 bytes)        | PAYLOAD (N bytes, máximo 8 KB)                              |
++-------------------------+-------------------------------------------------------------+
+| Tamaño del Payload      | 1|Juan|Perez|30111222|1990-01-01|7574 \n                    |
+| (Big-Endian uint32)     | 1|Maria|Gomez|40111222|1995-02-02|1234                      |
++-------------------------+-------------------------------------------------------------+
+```
 ### Ejercicio N°7:
 
 Modificar los clientes para que notifiquen al servidor al finalizar con el envío de todas las apuestas y así proceder con el sorteo.
