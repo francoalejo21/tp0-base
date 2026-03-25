@@ -188,6 +188,33 @@ En este ejercicio es importante considerar los mecanismos de sincronización a u
 
 Modificar el servidor para que permita aceptar conexiones y procesar mensajes en paralelo. En caso de que el alumno implemente el servidor en Python utilizando _multithreading_,  deberán tenerse en cuenta las [limitaciones propias del lenguaje](https://wiki.python.org/moin/GlobalInterpreterLock).
 
+#### Resolución 
+
+Con el objetivo de escalar la arquitectura y permitir que múltiples agencias envíen sus lotes de apuestas simultáneamente, se modificó el servidor para aceptar y procesar conexiones en paralelo. Al estar implementado en **Go**, se optó por un modelo basado en *Goroutines*.
+
+Sin embargo, la concurrencia introduce el desafío de acceder y modificar recursos compartidos (como el archivo de almacenamiento y los contadores de estado) de manera segura. A continuación, se detallan los mecanismos de sincronización implementados:
+
+#### 1. Procesamiento Paralelo mediante Goroutines
+En el ciclo principal del servidor (`Run()`), cada vez que se acepta una nueva conexión TCP mediante `acceptNewConnection()`, el procesamiento de esa conexión se delega a una nueva *Goroutine* ejecutando `go s.handleClientConnection(conn)`. 
+Esto libera inmediatamente el hilo principal, permitiendo que el servidor escuche y atienda a la siguiente agencia sin bloqueos, logrando una verdadera concurrencia en la atención de clientes.
+
+#### 2. Protección de Recursos Críticos (Mutexes)
+Al tener múltiples clientes ejecutándose en paralelo, es necesario proteger las secciones críticas del código para evitar que dos o más *goroutines* corrompan la memoria o los archivos al intentar escribir al mismo tiempo. Se utilizaron dos `sync.Mutex` dedicados para separar responsabilidades y minimizar los cuellos de botella:
+
+* **`fileMutex` (Concurrencia de I/O):**
+  Utilizado en la función `storeAndConfirm()`. Garantiza que solo un lote de apuestas pueda ser escrito en el archivo `.csv` a la vez. Cuando una *goroutine* adquiere el `Lock()`, las demás que intenten persistir datos quedarán bloqueadas esperando su turno, asegurando la integridad estructural del archivo.
+  
+* **`stateMutex` (Concurrencia de Memoria):**
+  Protege las variables de estado del servidor (`finishedAgencies` y `drawCompleted`). Se utiliza en `handleFin()` para incrementar el contador de agencias finalizadas de forma atómica, y en `handleQuery()` para leer el estado del sorteo de forma segura.
+
+#### 3. Cierre Limpio (Graceful Shutdown) con WaitGroups
+La introducción de concurrencia obligó a modificar la lógica de apagado del servidor. Si el proceso recibe una señal `SIGTERM`, no puede simplemente cerrarse, ya que podría interrumpir abruptamente a las *goroutines* que se encuentran escribiendo apuestas.
+
+Para resolver esto, se utilizó la herramienta de sincronización `WaitGroup` que actúa como barrera bloqueando la ejecución hasta que el contador asociado a esta herramienta sea 0:
+* Cada vez que se lanza una conexión, se incrementa el contador (`s.wg.Add(1)`).
+* Al finalizar el manejo del cliente, se decrementa (`defer s.wg.Done()`).
+* En el manejador de señales (`SetupSignalHandler`), luego de marcar `s.running = false` y cerrar el *Listener* para no aceptar más peticiones, el servidor ejecuta `s.wg.Wait()`. Esto pausa el apagado del proceso hasta que todas las *goroutines* en vuelo hayan finalizado su trabajo.
+
 ## Condiciones de Entrega
 Se espera que los alumnos realicen un _fork_ del presente repositorio para el desarrollo de los ejercicios y que aprovechen el esqueleto provisto tanto (o tan poco) como consideren necesario.
 
