@@ -181,6 +181,34 @@ Las funciones `load_bets(...)` y `has_won(...)` son provistas por la cátedra y 
 
 No es correcto realizar un broadcast de todos los ganadores hacia todas las agencias, se espera que se informen los DNIs ganadores que correspondan a cada una de ellas.
 
+#### Resolución
+
+Para soportar el ciclo de vida completo del sorteo de la lotería (recepción de apuestas, cierre del sorteo y notificación de ganadores), fue necesario evolucionar hacia un protocolo basado en comandos. Además, se implementó un mecanismo de sincronización para asegurar que los resultados solo se calculen cuando todos los clientes hayan finalizado.
+
+#### 1. Evolución del Protocolo: Multiplexación de Comandos
+Se modificó la estructura de los mensajes para que el servidor pueda distinguir qué acción desea realizar el cliente. Ahora, cada *Payload* está prefijado por un tipo de comando (definido en `protocol.go`), seguido de un separador `|` y los datos correspondientes (si los hubiera).
+
+Los nuevos comandos introducidos son:
+* **`BATCH`**: Acompaña al lote de apuestas serializadas.
+* **`FIN`**: Indica que una agencia ha terminado de enviar todas sus apuestas. No posee payload adicional.
+* **`QUERY`**: Solicitud de un cliente para conocer los ganadores de su agencia. Su payload es el `AgencyID`.
+* **`WAIT`**: Respuesta del servidor indicando que el sorteo aún no se ha realizado.
+* **`WINNERS`**: Respuesta del servidor con los DNI ganadores. Su payload es una lista separada por comas.
+
+El servidor ahora utiliza la función `protocol.ReadCommand()` para extraer dinámicamente el comando y enrutar la ejecución hacia el *handler* adecuado (`handleFin`, `handleQuery`, `storeAndConfirm`).
+
+#### 2. Barrera de Sincronización en el Servidor
+Para garantizar que el sorteo (cálculo de ganadores) ocurra en el momento exacto en que todas las agencias hayan terminado de enviar sus apuestas, el servidor implementa un contador de estado (`finishedAgencies`).
+* Cada vez que el servidor recibe un comando `FIN` de un cliente, incrementa este contador.
+* Se compara este valor contra la cantidad total de agencias esperadas (`clientAmounts`, inyectado por configuración).
+* Solo cuando `finishedAgencies == clientAmounts`, el servidor marca el estado `drawCompleted = true`, simulando el cierre del sorteo.
+
+#### 3. Consulta de Resultados mediante Polling Límpios
+Una vez que el cliente finaliza el envío de lotes y despacha el comando `FIN`, necesita conocer sus ganadores. Sin embargo, no puede saber en qué momento el resto de las agencias terminarán. Para resolver esto, se implementó un patrón de *Polling* en el cliente (`pollWinners`):
+* El cliente abre una nueva conexión, envía un comando `QUERY` con su ID y espera una respuesta.
+* Si el servidor responde con **`WAIT`** (porque `drawCompleted` es falso), el cliente cierra la conexión de forma limpia, duerme durante 2 segundos (`TimeSleep`) para no saturar la red, y vuelve a intentar.
+* Si el servidor responde con **`WINNERS`**, el cliente parsea la lista de documentos ganadores, los imprime en pantalla y finaliza exitosamente su ejecución.
+
 ## Parte 3: Repaso de Concurrencia
 En este ejercicio es importante considerar los mecanismos de sincronización a utilizar para el correcto funcionamiento de la persistencia.
 
