@@ -154,6 +154,33 @@ Se deberá implementar un módulo de comunicación entre el cliente y el servido
 * Correcta separación de responsabilidades entre modelo de dominio y capa de comunicación.
 * Correcto empleo de sockets, incluyendo manejo de errores y evitando los fenómenos conocidos como [_short read y short write_](https://cs61.seas.harvard.edu/site/2018/FileDescriptors/).
 
+#### Resolución:
+
+Para abordar este ejercicio, se tomó la decisión de **migrar el servidor de Python a Golang**. Esto permitió maximizar la reutilización de código y estableciendo una arquitectura en tres capas bien definidas.
+
+#### 1. Capa de Aplicación (Cliente y Servidor)
+Se aisló por completo a la lógica de negocio de los detalles físicos de la red. 
+* **Cliente (`client.go`):** Al iniciar, lee las variables de entorno, construye la entidad `Bet` y delega su envío llamando únicamente a la función de alto nivel `protocol.SendBet()`. Luego espera el *ack* llamando a `protocol.ReceiveConfirmation()`, para finalmente registrar el log.
+* **Servidor (`server.go`):** Al aceptar una conexión TCP, delega la lectura de datos llamando a `protocol.ReceiveBet()`. Una vez que obtiene el struct `Bet` ya procesado, utiliza la función provista `StoreBets` para persistir en disco y cierra el ciclo respondiendo con `protocol.SendConfirmation()`.
+
+#### 2. Capa de Protocolo (Serialización y Framing)
+El paquete `protocol` (`protocol.go`) actúa como puente. Recibe las llamadas del Cliente/Servidor y se encarga de darles formato, para luego delegar la transmisión real al módulo de sockets:
+* **Serialización:** Convierte el struct `Bet` a texto, concatenando los campos con el delimitador `|` (ej: `1|Juan|Perez|30111222|1990-01-01|7574`).
+* **Framing (Length-Prefixed):** Para que el receptor sepa exactamente cuántos bytes leer sin bloquearse, empaqueta el mensaje con la siguiente estructura:
+
+```text
++-------------------------+---------------------------------------------------+
+| HEADER (4 bytes)        | PAYLOAD (N bytes, dinámico)                       |
++-------------------------+---------------------------------------------------+
+| Tamaño del Payload      | Datos de la apuesta serializados                  |
+| (Big-Endian uint32)     | ej: "1|Juan|Perez|30111222|1990-01-01|7574"       |
++-------------------------+---------------------------------------------------+
+```
+* **Delegación de Transporte**: Una vez construido el Frame, el protocolo no manipula las lecturas/escrituras crudas, sino que le pasa la responsabilidad al módulo de transporte (llamando a SendFrame y RecvFrame).
+#### 3. Capa de Transporte (Módulo Socket)
+El archivo socket.go es el único que interactúa a bajo nivel con la conexión TCP, garantizando una comunicación robusta y resolviendo los problemas propios del protocolo de transporte:
+- Para la prevención de **short-writes**, mediante la función SendAll, se itera sobre el buffer verificando la cantidad de bytes efectivamente escritos por conn.Write(). Si el sistema operativo no logra enviar el buffer completo en una llamada, el ciclo continúa enviando los bytes restantes.
+- Para la prevención de **short-reads**, mediante la función RecvAll, se itera sobre el buffer verificando la cantidad de bytes efectivamente leídos, de forma análoga al manejo de short-writes
 
 ### Ejercicio N°6:
 Modificar los clientes para que envíen varias apuestas a la vez (modalidad conocida como procesamiento por _chunks_ o _batchs_). 
