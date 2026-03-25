@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"sync"
 	"syscall"
 
 	"github.com/7574-sistemas-distribuidos/docker-compose-init/protocol"
@@ -18,10 +19,12 @@ var log = logging.MustGetLogger("log")
 type Server struct {
 	listener         net.Listener
 	running          bool
-	conn             net.Conn
 	clientAmounts    int
 	finishedAgencies int
 	drawCompleted    bool
+	stateMutex       sync.Mutex // Mutex para cambiar estado de finishedAgencies y drawCompleted de forma atómica
+	fileMutex        sync.Mutex
+	wg               sync.WaitGroup
 }
 
 func NewServer(port string, clients int) (*Server, error) {
@@ -48,9 +51,6 @@ func (s *Server) SetupSignalHandler() {
 		<-sigchan
 		log.Info("action: shutdown | result: in_progress | signal: SIGTERM")
 		s.running = false
-		if s.conn != nil {
-			s.conn.Close()
-		}
 		s.listener.Close()
 		log.Info("action: close_resource | result: success | resource: server_socket")
 	}()
@@ -60,14 +60,17 @@ func (s *Server) Run() {
 	for s.running {
 		conn := s.acceptNewConnection()
 		if conn != nil {
-			s.handleClientConnection(conn)
+			s.wg.Add(1)
+			go s.handleClientConnection(conn)
 		}
 	}
-	log.Info("action: shutdown | result: success")
+	log.Info("action: shutdown | result: Esperando a que finalicen las conexiones activas...")
+	s.wg.Wait()
+	log.Info("action: shutdown | result: success | msg: Servidor apagado correctamente")
 }
 
 func (s *Server) handleClientConnection(conn net.Conn) {
-	s.conn = conn
+	defer s.wg.Done()
 	defer s.cleanupConnection(conn)
 
 	for {
@@ -103,7 +106,6 @@ func (s *Server) handleClientConnection(conn net.Conn) {
 
 func (s *Server) cleanupConnection(conn net.Conn) {
 	conn.Close()
-	s.conn = nil
 	log.Info("action: close_resource | result: success | resource: client_socket")
 }
 
@@ -118,7 +120,9 @@ func (s *Server) handleDisconnection(err error) {
 func (s *Server) storeAndConfirm(conn net.Conn, bets []protocol.Bet) error {
 	amount := len(bets)
 
+	s.fileMutex.Lock()
 	err := protocol.StoreBets(bets)
+	s.fileMutex.Unlock()
 	if err != nil {
 		log.Errorf("action: bets_almacenadas | result: fail | cantidad: %v | error: %v", amount, err)
 		_ = protocol.SendBatchConfirmation(conn, false)
@@ -149,6 +153,7 @@ func (s *Server) acceptNewConnection() net.Conn {
 }
 
 func (s *Server) handleFin() {
+	s.stateMutex.Lock()
 	s.finishedAgencies++
 	log.Debugf("Agencia finalizada: %d/%d", s.finishedAgencies, s.clientAmounts)
 
@@ -156,10 +161,14 @@ func (s *Server) handleFin() {
 		log.Infof("action: sorteo | result: success")
 		s.drawCompleted = true
 	}
+	s.stateMutex.Unlock()
 }
 
 func (s *Server) handleQuery(conn net.Conn, agencyID string) {
-	if !s.drawCompleted {
+	s.stateMutex.Lock()
+	completed := s.drawCompleted
+	s.stateMutex.Unlock()
+	if !completed {
 		_ = protocol.SendWait(conn)
 		return
 	}
