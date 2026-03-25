@@ -3,7 +3,6 @@ package protocol
 import (
 	"encoding/binary"
 	"fmt"
-	"io"
 	"net"
 )
 
@@ -24,11 +23,15 @@ func SendAll(conn net.Conn, data []byte) error {
 	return nil
 }
 
-// RecvAll reads exactly n bytes from the connection
 func RecvAll(conn net.Conn, n uint32) ([]byte, error) {
 	buf := make([]byte, n)
-	if _, err := io.ReadFull(conn, buf); err != nil {
-		return nil, fmt.Errorf("short-read: expected %d bytes: %w", n, err)
+	var read uint32 = 0
+	for read < n {
+		m, err := conn.Read(buf[read:])
+		if err != nil {
+			return nil, fmt.Errorf("short-read: read %d/%d bytes: %w", read, n, err)
+		}
+		read += uint32(m)
 	}
 	return buf, nil
 }
